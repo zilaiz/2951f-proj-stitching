@@ -34,6 +34,7 @@ class GC_GaussianPolicy(Mlp, TorchStochasticPolicy):
             hidden_sizes,
             obs_dim,
             action_dim,
+            goal_dim,
             std=None,
             init_w=1e-3,
             min_log_std=None,
@@ -43,7 +44,7 @@ class GC_GaussianPolicy(Mlp, TorchStochasticPolicy):
     ):
         super().__init__(
             hidden_sizes,
-            input_size=obs_dim,
+            input_size=obs_dim + goal_dim,
             output_size=action_dim,
             init_w=init_w,
             output_activation=torch.tanh,
@@ -62,6 +63,7 @@ class GC_GaussianPolicy(Mlp, TorchStochasticPolicy):
                 last_hidden_size = obs_dim
                 if len(hidden_sizes) > 0:
                     last_hidden_size = hidden_sizes[-1]
+                ## add a separate head for std
                 self.last_fc_log_std = nn.Linear(last_hidden_size, action_dim)
                 self.last_fc_log_std.weight.data.uniform_(-init_w, init_w)
                 self.last_fc_log_std.bias.data.uniform_(-init_w, init_w)
@@ -75,18 +77,28 @@ class GC_GaussianPolicy(Mlp, TorchStochasticPolicy):
             assert LOG_SIG_MIN <= self.log_std <= LOG_SIG_MAX
 
     def forward(self, obs, goal):
-        h = obs
+        # h = obs
+        ## cat obs and goal, and feed them to self.fcs
+        assert obs.ndim == 2 and goal.ndim == 2
+        h = torch.cat([obs, goal], dim=1)
+        
         for i, fc in enumerate(self.fcs):
             h = self.hidden_activation(fc(h))
+        
         preactivation = self.last_fc(h)
+
         mean = self.output_activation(preactivation)
         if self.std is None:
             if self.std_architecture == "shared":
+                ## ** default **
+                ## use prediction - input: latent feature, output: log std (0-1)
                 log_std = torch.sigmoid(self.last_fc_log_std(h))
             elif self.std_architecture == "values":
+                ## use pre defined value
                 log_std = torch.sigmoid(self.log_std_logits)
             else:
                 raise ValueError(self.std_architecture)
+            ## scale down to a given range
             log_std = self.min_log_std + log_std * (
                         self.max_log_std - self.min_log_std)
             std = torch.exp(log_std)
