@@ -9,6 +9,7 @@ from sklearn.cluster import KMeans
 
 from collections import defaultdict
 from torch.utils.data import Dataset
+import pdb
 
 def convert_remote_to_local(dataset_name, env):
 
@@ -87,6 +88,12 @@ def convert_remote_to_local(dataset_name, env):
         pickle.dump(dataset, fp)
     
 def extract_discrete_id_to_data_id_map(discrete_goals, dones, last_valid_traj):
+    '''
+    ??? 
+    Create and the dict of cluster -- key: cluster idx, value: array of state idx
+    discrete_goals: labels given by kmeans
+    last_valid_traj: idx of the end of the last valid (finished) traj
+    '''
     discrete_goal_to_data_idx = defaultdict(list)
     gm = 0
     for i, d_g in enumerate(discrete_goals):
@@ -123,6 +130,7 @@ class MinariEpisodicTrajectoryDataset(Dataset):
         with open(path, 'rb') as fp:
             self.dataset = pickle.load(fp)
 
+        # dict_keys(['observations', 'actions', 'terminations', 'success_count', 'episode_count'])
         self.observations = self.dataset['observations']['observation']     
         self.achieved_goals = self.dataset['observations']['achieved_goal']
         self.actions = self.dataset['actions']
@@ -150,8 +158,9 @@ class MinariEpisodicTrajectoryDataset(Dataset):
             self.achieved_discrete_goals = kmeans.labels_
             kmeans = None
         
-        self.state_dim = self.observations.shape[-1]
-        self.state_dtype = self.observations.dtype
+        pdb.set_trace()
+        self.state_dim = self.observations.shape[-1] # pointmaze 4
+        self.state_dtype = self.observations.dtype # float
         self.act_dim = self.actions.shape[-1]
         self.act_dtype = self.actions.dtype
         self.goal_dim = self.achieved_goals.shape[-1]
@@ -204,7 +213,8 @@ class MinariEpisodicTrajectoryDataset(Dataset):
         return state, goal, action
 
 class MinariEpisodicDataset(Dataset):
-    def __init__(self, dataset_name, remote_data, augment_data, augment_prob, nclusters=40):
+    def __init__(self, dataset_name, remote_data, augment_data, augment_prob, nclusters=40,
+                 return_reward=None):
         super().__init__()
         if remote_data:
             path = 'data/'+dataset_name+'-remote.pkl'
@@ -219,11 +229,13 @@ class MinariEpisodicDataset(Dataset):
         self.achieved_goals = self.dataset['observations']['achieved_goal']
         self.actions = self.dataset['actions']
 
+        ## np array: index of states that the episodes end
         (ends,) = np.where(self.dataset['terminations'])
         self.starts = np.concatenate(([0], ends[:-1] + 1))
         self.lengths = ends - self.starts + 1
         self.num_trajectories = len(self.starts)
 
+        ## remove the last episode (which is un-finished)
         self.ends = ends[ self.dataset['observations']['episode_id'][ : ends[-1] + 1 ] ]
         
         if augment_data:    
@@ -234,15 +246,19 @@ class MinariEpisodicDataset(Dataset):
             print('kmeans done! time taken :', time_elapsed)
 
             self.discrete_goal_to_data_idx = extract_discrete_id_to_data_id_map(kmeans.labels_, self.dataset['terminations'], self.ends[-1])
+            ## (1e6,), label of each state
             self.achieved_discrete_goals = kmeans.labels_
             kmeans = None
 
+            pdb.set_trace()
         self.goal_dim = self.achieved_goals.shape[-1]
         self.augment_data = augment_data
         self.augment_prob = augment_prob
         self.dataset = None
+        self.return_reward = return_reward
 
     def __len__(self):
+        '''some hacks'''
         return self.num_trajectories * 100
     
     def __getitem__(self, idx):
@@ -250,20 +266,53 @@ class MinariEpisodicDataset(Dataset):
         Reminder: np.random.randint samples from the set [low, high)
         '''
         idx = idx % self.num_trajectories
-        traj_len = self.lengths[idx] - 1                        #traj_len = T, traj_len is the number of actions taken in the trajectory
+        ## a traj of len T has (T-1) actions
+        # traj_len = T - 1, traj_len is the number of actions taken in the trajectory
+        traj_len = self.lengths[idx] - 1
         traj_start_i = self.starts[idx]
         assert self.ends[traj_start_i] == traj_start_i + traj_len
-
-        si = np.random.randint(0, traj_len)                     #si can be [0, T-1]  
+        
+        ## start, traj_len not included
+        si = np.random.randint(0, traj_len) #si can be [0, T-1)
 
         state = torch.tensor(self.observations[traj_start_i + si])
         action = torch.tensor(self.actions[traj_start_i + si])
         
+
         if self.augment_data and np.random.uniform(0, 1) <= self.augment_prob:
+            ## get the cluster idx of one future state in the same trajectory
             dummy_discrete_goal = self.achieved_discrete_goals[ traj_start_i + np.random.randint(si, traj_len) + 1 ]
+            ## get a random sample s' in the same cluster 
             nearby_goal_idx = np.random.choice(self.discrete_goal_to_data_idx[dummy_discrete_goal])            
+            ## retrieve one state in the future of s'
             goal = torch.tensor(self.achieved_goals[ np.random.randint(nearby_goal_idx, self.ends[nearby_goal_idx] + 1) ])
         else:
+            ## what ever goal in the future
             goal = torch.tensor(self.achieved_goals[ traj_start_i + np.random.randint(si, traj_len) + 1 ])
 
-        return state, goal, action
+        if self.return_reward is not None:
+            # define implicit reward for q_learning
+            # in offline setting, err_thres should be very small
+            next_state = torch.tensor(self.observations[traj_start_i + si + 1])
+            next_achieved_goal = torch.tensor(self.achieved_goals[ traj_start_i + si + 1 ])
+            ## get if arrived
+            if torch.linalg.norm( goal - next_achieved_goal ) < self.return_reward['err_thres']:
+                r = self.return_reward['s'] # 1 suc
+                terminal = True
+            else:
+                r = self.return_reward['f'] # 0 fail
+                terminal = False
+
+            # pdb.set_trace()
+            sample_dict = dict(
+                obs=state,
+                next_obs=next_state,
+                goal=goal,
+                action=action,
+                reward=np.array([r,]),
+                terminal=np.array([terminal,]),
+            )
+            return sample_dict
+        
+        else:
+            return state, goal, action
