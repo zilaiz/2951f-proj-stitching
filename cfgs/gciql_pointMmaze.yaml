@@ -1,0 +1,83 @@
+seed: 1
+device: cuda
+# agent_name: 
+
+# gc_policy
+policy:
+  _target_: models.gc_gaussian_policy.GC_GaussianPolicy
+  hidden_sizes: [256, 256]
+  max_log_std: 0
+  min_log_std: -6
+  std_architecture: values
+
+# trainer_kwargs:
+trainer:
+  _target_: models.iql.iql_trainer.IQLTrainer
+  discount: 0.99
+  policy_lr: 0.0003 # ${eval:3e-4} # 3e-4
+  qf_lr: 0.0003 # 3E-4
+  reward_scale: 1
+  soft_target_tau: 0.005
+  policy_weight_decay: 0
+  q_weight_decay: 0
+  reward_transform_kwargs:
+  terminal_transform_kwargs:
+  beta: ${eval:1.0/3} # 1.0/3
+  quantile: 0.7
+  clip_score: 100
+
+qf_kwargs:
+  hidden_sizes: [256, 256]
+
+vf_kwargs:
+  hidden_sizes: [256, 256]
+
+
+#eval
+num_eval_ep: 10
+num_eval_len:
+
+# env
+env_name: 
+dataset_name: pointmaze-medium-v0
+remote_data: False
+num_workers: 4
+render: False
+
+#train
+num_updates_per_iter: 1000 # 10
+max_train_iters: 25         #25 x 40000 -> 1000000 transition batches
+batch_size: 256
+lr: 1e-3
+
+# data
+augment_data: False
+augment_prob: 0
+nclusters: 
+return_reward: 
+  s: 1 
+  f: 0 
+  err_thres: 0.001
+
+#logging
+log_dir: logs/
+log_time: ${now:%Y%m%d}_${now:%H%M%S}
+save_path:
+wandb_log: True
+wandb_entity: yluo
+wandb_run_name:
+wandb_group_name: 
+wandb_dir:
+
+#saving
+save_snapshot: True
+save_snapshot_interval: 25
+
+#hydra
+hydra:
+  run:
+    dir: ${log_dir}/${dataset_name}/${hydra:job.config_name}/${now:%Y%m%d}_${now:%H%M%S}
+  job:
+    chdir: False
+
+# save_path_2: ${log_dir}/${dataset_name}/${hydra.job.config_name}/${log_time}
