@@ -79,3 +79,5 @@ hydra:
     dir: ${log_dir}/${dataset_name}/${hydra:job.config_name}/${now:%Y%m%d}_${now:%H%M%S}
   job:
     chdir: False
+
+# save_path_2: ${log_dir}/${dataset_name}/${hydra.job.config_name}/${log_time}

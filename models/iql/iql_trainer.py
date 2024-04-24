@@ -18,7 +18,7 @@ from rlkit.core.logging import add_prefix
 from rlkit.util.ml_util import PiecewiseLinearSchedule, ConstantSchedule
 import torch.nn.functional as F
 from rlkit.torch.networks import LinearTransform
-import time
+import time, pdb
 
 
 class IQLTrainer(TorchTrainer):
@@ -123,13 +123,18 @@ class IQLTrainer(TorchTrainer):
         self.clip_score = clip_score
         self.beta = beta
         self.quantile = quantile
+        self.device = None
 
     def train_from_torch(self, batch, train=True, pretrain=False,):
-        rewards = batch['rewards']
-        terminals = batch['terminals']
-        obs = batch['observations']
-        actions = batch['actions']
-        next_obs = batch['next_observations']
+        # device = self.policy.device
+        device = self.device
+        rewards = batch['reward'].to(device) # B, 1
+        terminals = batch['terminal'].to(device) # B, 1
+        obs = batch['obs'].to(device)
+        actions = batch['action'].to(device)
+        next_obs = batch['next_obs'].to(device)
+        goal = batch['goal'].to(device)
+
         if self.reward_transform:
             rewards = self.reward_transform(rewards)
 
@@ -138,17 +143,19 @@ class IQLTrainer(TorchTrainer):
         """
         Policy and Alpha Loss
         """
-        dist = self.policy(obs)
+        dist = self.policy(obs, goal)
 
         """
         QF Loss
         """
         ## Q_{pred}
-        q1_pred = self.qf1(obs, actions)
-        q2_pred = self.qf2(obs, actions)
+        q1_pred = self.qf1(obs, actions, goal)
+        q2_pred = self.qf2(obs, actions, goal)
         ## ( V(s_{t+1})  )
-        target_vf_pred = self.vf(next_obs).detach()
+        target_vf_pred = self.vf(next_obs, goal).detach()
 
+        ## NOTE [Caution] rewards must be (B, 1), otherwise auto broadcast
+        assert rewards.ndim == 2 and terminals.ndim == 2
         # Q_{target} = r(s,a) + (1-terminal) * gamma * V(s_{t+1})
         q_target = self.reward_scale * rewards + (1. - terminals) * self.discount * target_vf_pred
         q_target = q_target.detach()
@@ -156,15 +163,17 @@ class IQLTrainer(TorchTrainer):
         qf1_loss = self.qf_criterion(q1_pred, q_target)
         qf2_loss = self.qf_criterion(q2_pred, q_target)
 
+        # pdb.set_trace()
+
         """
         VF Loss
         """
         ## choose the smaller Q
         q_pred = torch.min(
-            self.target_qf1(obs, actions),
-            self.target_qf2(obs, actions),
+            self.target_qf1(obs, actions, goal),
+            self.target_qf2(obs, actions, goal),
         ).detach()
-        vf_pred = self.vf(obs)
+        vf_pred = self.vf(obs, goal)
         vf_err = vf_pred - q_pred
         ## True if V is larger than Q
         vf_sign = (vf_err > 0).float()
@@ -173,11 +182,14 @@ class IQLTrainer(TorchTrainer):
         ## 
         vf_loss = (vf_weight * (vf_err ** 2)).mean()
 
+        # pdb.set_trace()
+
         """
         Policy Loss
         """
         ## log_prob of actions
         policy_logpp = dist.log_prob(actions)
+        # pdb.set_trace()
 
         adv = q_pred - vf_pred
         exp_adv = torch.exp(adv / self.beta)
@@ -187,6 +199,8 @@ class IQLTrainer(TorchTrainer):
 
         weights = exp_adv[:, 0].detach()
         policy_loss = (-policy_logpp * weights).mean()
+
+        # pdb.set_trace()
 
         """
         Update networks
@@ -255,7 +269,7 @@ class IQLTrainer(TorchTrainer):
                 'terminals',
                 ptu.get_numpy(terminals),
             ))
-            self.eval_statistics['replay_buffer_len'] = self.replay_buffer._size
+            # self.eval_statistics['replay_buffer_len'] = self.replay_buffer._size
             policy_statistics = add_prefix(dist.get_diagnostics(), "policy/")
             self.eval_statistics.update(policy_statistics)
             self.eval_statistics.update(create_stats_ordered_dict(
@@ -272,6 +286,7 @@ class IQLTrainer(TorchTrainer):
                 ptu.get_numpy(vf_pred),
             ))
             self.eval_statistics['VF Loss'] = np.mean(ptu.get_numpy(vf_loss))
+            # pdb.set_trace()
 
         self._n_train_steps_total += 1
 
@@ -279,6 +294,9 @@ class IQLTrainer(TorchTrainer):
         stats = super().get_diagnostics()
         stats.update(self.eval_statistics)
         return stats
+
+    # def start_epoch_luo(self):
+        # self.eval_statistics = OrderedDict()
 
     def end_epoch(self, epoch):
         self._need_to_update_eval_statistics = True
@@ -294,6 +312,19 @@ class IQLTrainer(TorchTrainer):
             self.vf,
         ]
         return nets
+    
+    def set_models_train_mode(self):
+        for model in self.networks:
+            model.train()
+    
+    def set_models_eval_mode(self):
+        for model in self.networks:
+            model.eval()
+
+    def to(self, device):
+        for net in self.networks:
+            net.to(device)
+        self.device = device
 
     def get_snapshot(self):
         return dict(
@@ -304,3 +335,11 @@ class IQLTrainer(TorchTrainer):
             target_qf2=self.target_qf2,
             vf=self.vf,
         )
+    
+    def get_trainer_snapshot(self):
+        snapshot = {}
+        for k, v in self.get_snapshot().items():
+            snapshot['trainer/' + k] = v
+        return snapshot
+    
+

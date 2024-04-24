@@ -33,9 +33,9 @@ embed_dim: 128
 n_heads: 1
 
 #logging
-log_dir: dt_runs
+log_dir: logs/dt_runs
 wandb_log: False
-wandb_entity: raj19
+wandb_entity: yluo
 wandb_run_name:
 wandb_group_name:
 wandb_dir:

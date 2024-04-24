@@ -1,8 +1,5 @@
 import sys; sys.path.append('./'); # print(sys.path)
-import hydra
-import wandb
-import random
-import minari
+import hydra, wandb, random, minari, pdb
 import numpy as np
 import gymnasium as gym
 from pathlib import Path
@@ -13,17 +10,18 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from model import DecisionMLP
 from utils import MinariEpisodicDataset, convert_remote_to_local, get_test_start_state_goals, get_lr, AntmazeWrapper 
-import pdb
 import os.path as osp
 
-import utils
+import utils, os
 from utils.eval_utils import eval_env_gciql_luo
+from utils.load_utils import get_env
 from utils.misc import set_seed, get_current_time
 from omegaconf import OmegaConf
-OmegaConf.register_new_resolver("eval", eval)
-OmegaConf.register_new_resolver("now", get_current_time)
+OmegaConf.register_new_resolver("eval", eval, replace=True)
+OmegaConf.register_new_resolver("now", get_current_time, replace=True)
+os.environ['PYOPENGL_PLATFORM'] = 'egl'
+os.environ['MUJOCO_GL'] = 'egl'
 
 def train(cfg, hydra_cfg):
 
@@ -44,34 +42,8 @@ def train(cfg, hydra_cfg):
     time_elapsed = start_time - start_time
     start_time_str = start_time.strftime("%y-%m-%d-%H-%M-%S")
 
-    if "pointmaze" in cfg.dataset_name:
-        if "umaze" in cfg.dataset_name:
-            cfg.env_name = 'PointMaze_UMaze-v3'
-            cfg.nclusters = 20 if cfg.nclusters is None else cfg.nclusters
-        elif "medium" in cfg.dataset_name:
-            cfg.env_name = 'PointMaze_Medium-v3'
-            cfg.nclusters = 40 if cfg.nclusters is None else cfg.nclusters
-        elif "large" in cfg.dataset_name:
-            cfg.env_name = 'PointMaze_Large-v3'
-            cfg.nclusters = 80 if cfg.nclusters is None else cfg.nclusters
-        env = gym.make(cfg.env_name, continuing_task=False)
-
-    elif "antmaze" in cfg.dataset_name:
-        if "umaze" in cfg.dataset_name:
-            cfg.env_name = 'AntMaze_UMaze-v4'
-            cfg.nclusters = 20 if cfg.nclusters is None else cfg.nclusters
-        elif "medium" in cfg.dataset_name:
-            cfg.env_name = 'AntMaze_Medium-v4'
-            cfg.nclusters = 40 if cfg.nclusters is None else cfg.nclusters
-        elif "large" in cfg.dataset_name:
-            cfg.env_name = 'AntMaze_Large-v4'
-            cfg.nclusters = 80 if cfg.nclusters is None else cfg.nclusters
-        else:
-            raise NotImplementedError
-        env = AntmazeWrapper(gym.make(cfg.env_name, continuing_task=False))
-
-    else:
-        raise NotImplementedError
+    env = get_env(cfg)
+    # pdb.set_trace()
     
     env.action_space.seed(cfg.seed)
     env.observation_space.seed(cfg.seed)
@@ -140,6 +112,7 @@ def train(cfg, hydra_cfg):
             ### *** torch.nn.utils.clip_grad_norm_(model.parameters(), 0.25) ***
             log_action_losses.append(trainer.eval_statistics['Policy Loss'])
             # pdb.set_trace()
+        trainer.end_epoch(i_train_iter)
 
         time = datetime.now().replace(microsecond=0) - start_time - time_elapsed
         time_elapsed = datetime.now().replace(microsecond=0) - start_time
