@@ -9,6 +9,7 @@ env_*
 #local experiments
 local_exp/
 wandb/
+video/
 
 #dataset
 data

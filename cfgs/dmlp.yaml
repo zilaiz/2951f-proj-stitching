@@ -25,8 +25,8 @@ lr: 1e-3
 
 #logging
 log_dir: dt_runs
-wandb_log: False
-wandb_entity: raj19
+wandb_log: True
+wandb_entity: zilai_zeng
 wandb_run_name:
 wandb_group_name: 
 wandb_dir:
