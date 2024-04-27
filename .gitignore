@@ -34,3 +34,8 @@ notebooks/
 
 #mujoco
 MUJOCO_LOG.TXT
+
+
+# slurm
+slurm/
+*.out
