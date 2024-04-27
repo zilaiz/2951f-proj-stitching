@@ -1,4 +1,4 @@
-seed: 1
+seed:
 device: cuda
 agent_name: dmlp
 
@@ -8,7 +8,7 @@ num_eval_len:
 
 # env
 env_name: 
-dataset_name: pointmaze-umaze-v0
+dataset_name: antmaze-umaze-v0
 remote_data: False
 num_workers: 4
 render: False
@@ -17,14 +17,17 @@ render: False
 num_updates_per_iter: 40000
 max_train_iters: 25         #25 x 40000 -> 1000000 transition batches
 
-augment_data: False
-augment_prob: 0
-nclusters: 
+augment_data: True
+augment_prob: 0.5
+nclusters: 40
+dataset_config: {}
 batch_size: 256
 lr: 1e-3
 
 #logging
-log_dir: logs/dmlp_runs
+log_dir: logs/
+log_time: ${now:%Y%m%d}_${now:%H%M%S}
+save_path:
 wandb_log: True
 wandb_entity: yluo
 wandb_run_name:
@@ -38,6 +41,6 @@ save_snapshot_interval: 25
 #hydra
 hydra:
   run:
-    dir: ${log_dir}/${dataset_name}/${now:%Y.%m.%d}_${now:%H.%M.%S}
+    dir: ${log_dir}/${dataset_name}/${hydra:job.config_name}/${now:%Y%m%d}_${now:%H%M%S}
   job:
     chdir: False

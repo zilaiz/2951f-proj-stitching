@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 
 from model import DecisionMLP
 from utils import MinariEpisodicDataset, convert_remote_to_local, get_test_start_state_goals, get_lr, AntmazeWrapper 
+import pdb
 
 def set_seed(seed):
     random.seed(seed)
@@ -241,10 +242,12 @@ def main(cfg: DictConfig):
         if cfg.wandb_dir is None:
             cfg.wandb_dir = hydra_cfg['runtime']['output_dir']
 
-        project_name = cfg.dataset_name
-        wandb.init(project=project_name, entity=cfg.wandb_entity, config=dict(cfg), dir=cfg.wandb_dir, group=cfg.wandb_group_name)
+        # project_name = cfg.dataset_name
+        wandb.init(project='2951f-stitch-2024spring', entity=cfg.wandb_entity, 
+                   config=dict(cfg), dir=cfg.wandb_dir, group=cfg.dataset_name,)
         wandb.run.name = cfg.wandb_run_name
     
+    pdb.set_trace()
     train(cfg, hydra_cfg)
         
 if __name__ == "__main__":

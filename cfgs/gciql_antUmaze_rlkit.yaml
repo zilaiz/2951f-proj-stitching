@@ -20,10 +20,12 @@ trainer:
   soft_target_tau: 0.005
   policy_weight_decay: 0
   q_weight_decay: 0
-  reward_transform_kwargs:
+  reward_transform_kwargs: 
+    m: 1
+    b: -1
   terminal_transform_kwargs:
-  beta: ${eval:1.0/3} # 1.0/3
-  quantile: 0.7
+  beta: 0.1 # ${eval:1.0/3} # 1.0/3
+  quantile: 0.9
   clip_score: 100
 
 qf_kwargs:
@@ -46,9 +48,9 @@ render: False
 
 #train
 num_updates_per_iter: 20000 # 10
-max_train_iters: 25         #25 x 40000 -> 1000000 transition batches
+max_train_iters: 50         #25 x 40000 -> 1000000 transition batches
 batch_size: 256
-lr: 1e-3
+# lr: 1e-3
 
 # data
 augment_data: False

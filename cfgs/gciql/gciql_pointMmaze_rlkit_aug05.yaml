@@ -20,10 +20,10 @@ trainer:
   soft_target_tau: 0.005
   policy_weight_decay: 0
   q_weight_decay: 0
-  reward_transform_kwargs:
+  reward_transform_kwargs: {m: 1, b: -1}
   terminal_transform_kwargs:
-  beta: ${eval:1.0/3} # 1.0/3
-  quantile: 0.7
+  beta: 0.1
+  quantile: 0.9
   clip_score: 100
 
 qf_kwargs:
@@ -45,15 +45,15 @@ num_workers: 4
 render: False
 
 #train
-num_updates_per_iter: 10000 # 10
-max_train_iters: 25         #25 x 40000 -> 1000000 transition batches
+num_updates_per_iter: 20000 # 10
+max_train_iters: 50         #25 x 40000 -> 1000000 transition batches
 batch_size: 256
-lr: 1e-3
+# lr: 1e-3
 
 # data
-augment_data: False
-augment_prob: 0
-nclusters: 
+augment_data: True
+augment_prob: 0.5
+nclusters: 40
 return_reward: 
   s: 1 
   f: 0 
@@ -79,5 +79,3 @@ hydra:
     dir: ${log_dir}/${dataset_name}/${hydra:job.config_name}/${now:%Y%m%d}_${now:%H%M%S}
   job:
     chdir: False
-
-# save_path_2: ${log_dir}/${dataset_name}/${hydra.job.config_name}/${log_time}

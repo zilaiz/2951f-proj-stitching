@@ -1,5 +1,6 @@
 import torch.nn as nn
 from typing import Iterable
+import datetime
 
 def weight_init(m):
     if isinstance(m, nn.Linear):
@@ -29,3 +30,29 @@ def get_parameters(modules: Iterable[nn.Module]):
     for module in modules:
         model_parameters += list(module.parameters())
     return model_parameters
+
+## ---------- LUO ------------
+import random, torch
+import numpy as np
+from colorama import Fore
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+# Custom resolver to get the current time
+def get_current_time(fmt="%Y-%m-%d %H:%M:%S"):
+    now = datetime.datetime.now()
+    return now.strftime(fmt)
+
+def print_color(s, c='r'):
+    if c == 'r':
+        print(Fore.RED + s + Fore.RESET)
+    elif c == 'b':
+        print(Fore.BLUE + s + Fore.RESET)
+    elif c == 'y':
+        print(Fore.YELLOW + s + Fore.RESET)
+    else:
+        print(Fore.CYAN + s + Fore.RESET)

@@ -214,7 +214,7 @@ class MinariEpisodicTrajectoryDataset(Dataset):
 
 class MinariEpisodicDataset(Dataset):
     def __init__(self, dataset_name, remote_data, augment_data, augment_prob, nclusters=40,
-                 return_reward=None):
+                 return_reward=None, dataset_config={}):
         super().__init__()
         if remote_data:
             path = 'data/'+dataset_name+'-remote.pkl'
@@ -241,7 +241,13 @@ class MinariEpisodicDataset(Dataset):
         if augment_data:    
             start_time = datetime.now().replace(microsecond=0)
             print('starting kmeans ... ')
-            kmeans = KMeans(n_clusters=nclusters, n_init="auto").fit(self.observations)
+            # pdb.set_trace()
+            ## consider only goal augmentation...
+            if dataset_config.get('only_goal_aug', False):
+                kmeans = KMeans(n_clusters=nclusters, n_init="auto").fit(self.observations[:, :2])
+            else:
+                kmeans = KMeans(n_clusters=nclusters, n_init="auto").fit(self.observations)
+            
             time_elapsed = str(datetime.now().replace(microsecond=0) - start_time)
             print('kmeans done! time taken :', time_elapsed)
 
@@ -250,12 +256,13 @@ class MinariEpisodicDataset(Dataset):
             self.achieved_discrete_goals = kmeans.labels_
             kmeans = None
 
-            pdb.set_trace()
+            # pdb.set_trace()
         self.goal_dim = self.achieved_goals.shape[-1]
         self.augment_data = augment_data
         self.augment_prob = augment_prob
         self.dataset = None
         self.return_reward = return_reward
+        self.min_num_steps_to_goal = dataset_config.get('min_num_steps_to_goal', 0)
 
     def __len__(self):
         '''some hacks'''
@@ -280,6 +287,7 @@ class MinariEpisodicDataset(Dataset):
         
 
         if self.augment_data and np.random.uniform(0, 1) <= self.augment_prob:
+            ## TODO: min_num_steps_to_goal not implemented
             ## get the cluster idx of one future state in the same trajectory
             dummy_discrete_goal = self.achieved_discrete_goals[ traj_start_i + np.random.randint(si, traj_len) + 1 ]
             ## get a random sample s' in the same cluster 
@@ -288,7 +296,9 @@ class MinariEpisodicDataset(Dataset):
             goal = torch.tensor(self.achieved_goals[ np.random.randint(nearby_goal_idx, self.ends[nearby_goal_idx] + 1) ])
         else:
             ## what ever goal in the future
-            goal = torch.tensor(self.achieved_goals[ traj_start_i + np.random.randint(si, traj_len) + 1 ])
+            g_si = si + min(self.min_num_steps_to_goal, traj_len - si - 1)
+            goal = torch.tensor(self.achieved_goals[ traj_start_i + np.random.randint(g_si, traj_len) + 1 ])
+            # pdb.set_trace()
 
         if self.return_reward is not None:
             # define implicit reward for q_learning

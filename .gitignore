@@ -3,6 +3,13 @@ __pycache__/
 ## luos
 logs/**
 outputs/**
+scripts/luotest**
+scripts/eval/luotest**
+scripts/eval/**.jpg
+scripts/eval/**.png
+trash/**
+cfg/tmp/**
+
 ## --------
 
 #saved binaries

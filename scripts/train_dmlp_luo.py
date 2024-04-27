@@ -1,3 +1,4 @@
+import sys; sys.path.append('./'); # print(sys.path)
 import hydra
 import wandb
 import random
@@ -15,70 +16,12 @@ from torch.utils.data import DataLoader
 from model import DecisionMLP
 from utils import MinariEpisodicDataset, convert_remote_to_local, get_test_start_state_goals, get_lr, AntmazeWrapper 
 import pdb
-
-def set_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-         
-def eval_env(cfg, model, device, render=False):
-    if render:
-        render_mode = 'human'
-    else:
-        render_mode = None
-
-    if "pointmaze" in cfg.dataset_name:
-        env = env = gym.make(cfg.env_name, continuing_task=False, render_mode=render_mode)
-    elif "antmaze" in cfg.dataset_name:
-        env = AntmazeWrapper(env = gym.make(cfg.env_name, continuing_task=False, render_mode=render_mode))
-    else:
-        raise NotImplementedError    
-
-    test_start_state_goal = get_test_start_state_goals(cfg)
-    
-    model.eval()
-    results = dict()
-    with torch.no_grad():
-        cum_reward = 0
-        for ss_g in test_start_state_goal:
-            total_reward = 0
-            total_timesteps = 0
-            
-            print(ss_g['name'] + ':')
-            for _ in range(cfg.num_eval_ep):
-                obs, _ = env.reset(options=ss_g)
-                done = False
-                for t in range(env.spec.max_episode_steps):
-                    total_timesteps += 1
-
-                    running_state = torch.tensor(obs['observation'], dtype=torch.float32, device=device).view(1, -1)
-                    target_goal = torch.tensor(obs['desired_goal'], dtype=torch.float32, device=device).view(1, -1)
-                    
-                    act_preds = model.forward(
-                            running_state,
-                            target_goal,
-                            )
-                    act = act_preds[0].detach()
-
-                    obs, running_reward, done, _, _ = env.step(act.cpu().numpy())
-
-                    total_reward += running_reward
-
-                    if done:
-                        break
-                
-                print('Achievied goal: ', tuple(obs['achieved_goal'].tolist()))
-                print('Desired goal: ', tuple(obs['desired_goal'].tolist()))
-            
-            print("=" * 60)
-            cum_reward += total_reward
-            results['eval/' + str(ss_g['name']) + '_avg_reward'] = total_reward / cfg.num_eval_ep
-            results['eval/' + str(ss_g['name']) + '_avg_ep_len'] = total_timesteps / cfg.num_eval_ep
-        
-        results['eval/avg_reward'] = cum_reward / (cfg.num_eval_ep * len(test_start_state_goal))
-        env.close()
-    return results
+from utils.load_utils import get_env
+from utils.misc import set_seed, get_current_time
+from utils.eval_utils import eval_env_gciql_luo
+from omegaconf import OmegaConf
+OmegaConf.register_new_resolver("eval", eval, replace=True)
+OmegaConf.register_new_resolver("now", get_current_time, replace=True)
 
 def train(cfg, hydra_cfg):
 
@@ -89,42 +32,16 @@ def train(cfg, hydra_cfg):
     device = torch.device(cfg.device)
 
     if cfg.save_snapshot:
-        checkpoint_path = Path(hydra_cfg['runtime']['output_dir']) / Path('checkpoint')
+        # checkpoint_path = Path(hydra_cfg['runtime']['output_dir']) / Path('checkpoint')
+        checkpoint_path = Path(cfg.save_path) / Path('checkpoint')
         checkpoint_path.mkdir(exist_ok=True)
-        best_eval_returns = 0
+        best_eval_returns = -100
 
     start_time = datetime.now().replace(microsecond=0)
     time_elapsed = start_time - start_time
     start_time_str = start_time.strftime("%y-%m-%d-%H-%M-%S")
 
-    if "pointmaze" in cfg.dataset_name:
-        if "umaze" in cfg.dataset_name:
-            cfg.env_name = 'PointMaze_UMaze-v3'
-            cfg.nclusters = 20 if cfg.nclusters is None else cfg.nclusters
-        elif "medium" in cfg.dataset_name:
-            cfg.env_name = 'PointMaze_Medium-v3'
-            cfg.nclusters = 40 if cfg.nclusters is None else cfg.nclusters
-        elif "large" in cfg.dataset_name:
-            cfg.env_name = 'PointMaze_Large-v3'
-            cfg.nclusters = 80 if cfg.nclusters is None else cfg.nclusters
-        env = gym.make(cfg.env_name, continuing_task=False)
-
-    elif "antmaze" in cfg.dataset_name:
-        if "umaze" in cfg.dataset_name:
-            cfg.env_name = 'AntMaze_UMaze-v4'
-            cfg.nclusters = 20 if cfg.nclusters is None else cfg.nclusters
-        elif "medium" in cfg.dataset_name:
-            cfg.env_name = 'AntMaze_Medium-v4'
-            cfg.nclusters = 40 if cfg.nclusters is None else cfg.nclusters
-        elif "large" in cfg.dataset_name:
-            cfg.env_name = 'AntMaze_Large-v4'
-            cfg.nclusters = 80 if cfg.nclusters is None else cfg.nclusters
-        else:
-            raise NotImplementedError
-        env = AntmazeWrapper(gym.make(cfg.env_name, continuing_task=False))
-
-    else:
-        raise NotImplementedError
+    env = get_env(cfg)
     
     env.action_space.seed(cfg.seed)
     env.observation_space.seed(cfg.seed)
@@ -133,7 +50,7 @@ def train(cfg, hydra_cfg):
     if cfg.remote_data:
         convert_remote_to_local(cfg.dataset_name, env)
    
-    train_dataset = MinariEpisodicDataset(cfg.dataset_name, cfg.remote_data, cfg.augment_data, cfg.augment_prob, cfg.nclusters)
+    train_dataset = MinariEpisodicDataset(cfg.dataset_name, cfg.remote_data, cfg.augment_data, cfg.augment_prob, cfg.nclusters, dataset_config=cfg.dataset_config)
     
     train_data_loader = DataLoader(
                             train_dataset,
@@ -165,6 +82,8 @@ def train(cfg, hydra_cfg):
                 train_data_iter = iter(train_data_loader)
                 states, goals, actions = next(train_data_iter)
 
+            ## goals are specified in the xy coordiante, not cell coordinate
+            # pdb.set_trace()
             states = states.to(device)         
             actions = actions.to(device)                        
             goals = goals.to(device)                            
@@ -189,7 +108,7 @@ def train(cfg, hydra_cfg):
         
         mean_action_loss = np.mean(log_action_losses)
 
-        results = eval_env(cfg, model, device, render=cfg.render)
+        results = eval_env_gciql_luo(cfg, model, device, render=cfg.render)
 
         log_str = ("=" * 60 + '\n' +
                 "time elapsed: " + str(time_elapsed)  + '\n' +
@@ -234,20 +153,29 @@ def train(cfg, hydra_cfg):
     print("total training time: " + time_elapsed)
     print("=" * 60)
     
-@hydra.main(config_path='cfgs', config_name='dmlp', version_base=None)
+# @hydra.main(config_path='cfgs', config_name='dmlp', version_base=None)
+@hydra.main(config_path='../', version_base=None)
 def main(cfg: DictConfig):
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     
+    import os.path as osp
+    cfg_name = osp.splitext(hydra_cfg.job.config_name)[0]
+    cfg.save_path = osp.join(cfg.log_dir, cfg.dataset_name, cfg_name, cfg.log_time)
+    
     if cfg.wandb_log:
         if cfg.wandb_dir is None:
-            cfg.wandb_dir = hydra_cfg['runtime']['output_dir']
+            # cfg.wandb_dir = hydra_cfg['runtime']['output_dir']
+            cfg.wandb_dir = cfg.save_path
+
 
         # project_name = cfg.dataset_name
         wandb.init(project='2951f-stitch-2024spring', entity=cfg.wandb_entity, 
-                   config=dict(cfg), dir=cfg.wandb_dir, group=cfg.dataset_name,)
-        wandb.run.name = cfg.wandb_run_name
+                   config=dict(cfg), dir=cfg.wandb_dir, group=cfg.dataset_name,
+                   name=cfg_name, id=cfg_name)
+
+        # wandb.run.name = cfg.wandb_run_name
     
-    pdb.set_trace()
+    # pdb.set_trace()
     train(cfg, hydra_cfg)
         
 if __name__ == "__main__":
