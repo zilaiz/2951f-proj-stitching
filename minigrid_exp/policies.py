@@ -42,34 +42,34 @@ class BCPolicy(nn.Module):
     def __init__(self, input_dim, hidden_dim) -> None:
         super().__init__()
         # self.obs_enc = GoalCondObsEncoder(input_dim, hidden_dim)
-        self.obs_enc = ObsEncoder(input_dim, hidden_dim)
+        # self.obs_enc = ObsEncoder(input_dim, hidden_dim)
         
         self.policy_network = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 4)
         )
 
     
     def forward(self, states, goals):
-        obs_emb = self.obs_enc(states, goals)
-        actions = self.policy_network(obs_emb)
+        # obs_emb = self.obs_enc(states, goals)
+        actions = self.policy_network(states)
 
         return actions
     
 
 
 class DoubleCritic(nn.Module):
-    def __init__(self, hidden_dim):
+    def __init__(self, input_dim, hidden_dim):
         super().__init__()
         # DoubleCritic
         self.critic1 = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 1)
         )
         self.critic2 = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 1)
         )
@@ -84,26 +84,27 @@ class DoubleCritic(nn.Module):
 
 
 class IQL(nn.Module):
-    def __init__(self, input_dim, hidden_dim, action_dim, tau):
+    def __init__(self, obs_dim, hidden_dim, action_dim, tau):
         super().__init__()
+        self.obs_dim = obs_dim
         self.hidden_dim = hidden_dim
         self.action_dim = action_dim
         self.tau = tau
 
         # self.obs_enc = GoalCondObsEncoder(input_dim, self.hidden_dim)
-        self.obs_enc = ObsEncoder(input_dim, self.hidden_dim)
-        self.critic = DoubleCritic(hidden_dim=self.hidden_dim + self.action_dim)
-        self.target_critic = DoubleCritic(hidden_dim=self.hidden_dim + self.action_dim)
+        # self.obs_enc = ObsEncoder(self.input_dim, self.hidden_dim)
+        self.critic = DoubleCritic(input_dim = self.obs_dim + self.action_dim, hidden_dim=self.hidden_dim)
+        self.target_critic = DoubleCritic(input_dim = self.obs_dim + self.action_dim, hidden_dim=self.hidden_dim)
 
         self.actor = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(self.obs_dim, self.hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 4)
+            nn.Linear(self.hidden_dim, self.action_dim)
         )
 
         # Value function
         self.value = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(self.obs_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 1)
         )
@@ -130,17 +131,12 @@ class IQL(nn.Module):
         return v
     
     def forward(self, observations, goals):
-        obs_emb = self.obs_enc(observations, goals)
-        actions = self.actor(obs_emb)
+        # obs_emb = self.obs_enc(observations, goals)
+        # actions = self.actor(observations)
 
-        return actions
+        return self.actor_forward(observations)
         
     
     def target_update(self):  # update target
-        with torch.no_grad():
-            target_critic_state_dict = self.target_critic.state_dict()
-            current_critic_state_dict = self.critic.state_dict()
-            for key in target_critic_state_dict:
-                target_critic_state_dict[key] = current_critic_state_dict[key] * self.tau + target_critic_state_dict[key] * (1 - self.tau)
-            
-            self.target_critic.load_state_dict(target_critic_state_dict)
+        for target_param, source_param in zip(self.target_critic.parameters(), self.critic.parameters()):
+            target_param.data.copy_((1 - self.tau) * target_param.data + self.tau * source_param.data)

@@ -14,7 +14,7 @@ class MiniGridDataset(Dataset):
         self.actions = np.array(trajs['actions'])
         # self.rewards = trajs['rewards']
         self.dones = np.array(trajs['dones'])
-        self.rewards = np.full_like(self.actions, 0)
+        self.rewards = np.full_like(self.actions, -1.)
 
         self.all_unique_obs = [[pos[0], pos[1], d] for d in range(0, 4) for pos in self.env.all_empty_cells]
     
@@ -33,12 +33,12 @@ class MiniGridDataset(Dataset):
         if self.eval_goal:
             for idx, obs in enumerate(self.observations):
                 if obs[0] == self.eval_goal[0] and obs[1] == self.eval_goal[1]:
-                    self.rewards[idx - 1] = 1.
+                    self.rewards[idx - 1] = 0.
 
     def obs_to_one_hot(self, observation):
-        # identity_matrix = np.eye(len(self.all_unique_obs))
-        # return identity_matrix[self.all_unique_obs.index(observations)]
-        return self.all_unique_obs.index(observation)
+        identity_matrix = np.eye(len(self.all_unique_obs))
+        return identity_matrix[self.all_unique_obs.index(observation)]
+        # return self.all_unique_obs.index(observation)
 
     def __len__(self):
         return len(self.updated_actions) - 1
@@ -47,13 +47,13 @@ class MiniGridDataset(Dataset):
         # i = index // len(self.actions[0])
         # j = index - i * len(self.actions[0])
 
-        done = torch.tensor(self.updated_dones[index], dtype=torch.float32)
-        obs = torch.tensor(self.obs_to_one_hot(self.updated_observations[index])).long()
+        done = torch.tensor([self.updated_dones[index]], dtype=torch.float32)
+        obs = torch.tensor(self.obs_to_one_hot(self.updated_observations[index]))
         action = torch.tensor([self.updated_actions[index]])
-        next_obs = torch.tensor(self.obs_to_one_hot(self.updated_observations[index + 1])).long()
+        next_obs = torch.tensor(self.obs_to_one_hot(self.updated_observations[index + 1]))
         goal = next_obs.clone()
         one_hot_action = torch.eye(4)[action].view(-1)
-        reward = torch.tensor(self.updated_rewards[index])
-        mask = 1 - (reward or done)
+        reward = torch.tensor([self.updated_rewards[index]])
+        mask = -reward or (1 - done)
         
         return obs, action, reward, next_obs, goal, mask, one_hot_action
