@@ -1,7 +1,4 @@
-import hydra
-import wandb
-import random
-import minari
+import hydra, wandb, random, minari
 import numpy as np
 import gymnasium as gym
 
@@ -15,7 +12,10 @@ from rlkit.torch.sac.policies import MakeDeterministic
 import pdb, imageio
 import utils, os
 import os.path as osp
-import wandb
+from models.gc_gaussian_policy import GC_GaussianPolicy
+
+os.environ['PYOPENGL_PLATFORM'] = 'egl'
+os.environ['MUJOCO_GL'] = 'egl'
 
 def eval_env_gciql_luo(cfg, model, device, render=False):
     '''model is a goal conditioned policy'''
@@ -34,7 +34,8 @@ def eval_env_gciql_luo(cfg, model, device, render=False):
     test_start_state_goal = get_test_start_state_goals(cfg)
 
     os.makedirs(osp.join(cfg.save_path, 'eval'), exist_ok=True)
-    model = MakeDeterministic(model)
+    if isinstance(model, GC_GaussianPolicy):
+        model = MakeDeterministic(model)
     model.eval()
     results = dict()
     save_ep_freq = 5
@@ -49,7 +50,9 @@ def eval_env_gciql_luo(cfg, model, device, render=False):
             print(ss_g['name'] + ':')
             for i_ep in range(cfg.num_eval_ep):
                 env_imgs = [] # save the whole rollout
+                # pdb.set_trace()
                 obs, _ = env.reset(options=ss_g)
+                # pdb.set_trace()
                 done = False
                 ## rollout one episode (problem) below
                 for t in range(env.spec.max_episode_steps):
@@ -85,8 +88,8 @@ def eval_env_gciql_luo(cfg, model, device, render=False):
                 save_vis = done and \
                         ("antmaze" in cfg.dataset_name or "large" in cfg.dataset_name.lower())
                 if i_ep % save_ep_freq == 0 or save_vis:
-                    eval_save_st_gl_imgs(cfg, env_imgs, f"{ss_g['name']}-{i_ep}")
-                    eval_save_video(cfg, env_imgs, f"{ss_g['name']}-{i_ep}", freq=5)
+                    eval_save_st_gl_imgs(cfg, env_imgs, f"{ss_g['name']}-{i_ep}-{done}")
+                    eval_save_video(cfg, env_imgs, f"{ss_g['name']}-{i_ep}-{done}", freq=5)
             
             print("=" * 60)
             cum_reward += total_reward
